@@ -58,6 +58,36 @@ function checkAuth(req: http.IncomingMessage): boolean {
   return req.headers.authorization === `Bearer ${apiToken}`;
 }
 
+function paramsForLog(url: URL): Record<string, string | string[]> {
+  const params: Record<string, string | string[]> = {};
+  const redacted = new Set(['password', 'token', 'apiToken', 'api_token']);
+
+  for (const [key, value] of url.searchParams.entries()) {
+    const safeValue = redacted.has(key) ? '[redacted]' : value;
+    const existing = params[key];
+    if (Array.isArray(existing)) {
+      existing.push(safeValue);
+    } else if (existing !== undefined) {
+      params[key] = [existing, safeValue];
+    } else {
+      params[key] = safeValue;
+    }
+  }
+
+  return params;
+}
+
+function logRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
+  const started = Date.now();
+  const url = new URL(req.url || '/', `http://${req.headers.host || `${host}:${port}`}`);
+
+  res.on('finish', () => {
+    console.log(
+      `${req.method || 'UNKNOWN'} ${url.pathname} params=${JSON.stringify(paramsForLog(url))} -> ${res.statusCode} ${Date.now() - started}ms`
+    );
+  });
+}
+
 function isProviderAuthError(error: any): boolean {
   const status = error?.response?.status ?? error?.status ?? error?.statusCode;
   if (status === 401) return true;
@@ -190,6 +220,8 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
 }
 
 const server = http.createServer((req, res) => {
+  logRequest(req, res);
+
   handleRequest(req, res).catch((error: any) => {
     if (isProviderAuthError(error)) {
       const url = new URL(req.url || '/', `http://${req.headers.host || `${host}:${port}`}`);
