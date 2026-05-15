@@ -9,11 +9,11 @@ COPY package*.json ./
 RUN npm ci \
   && npx playwright install --with-deps chromium \
   && apt-get update \
-  && apt-get install -y --no-install-recommends xvfb \
+  && apt-get install -y --no-install-recommends xvfb xauth \
   && rm -rf /var/lib/apt/lists/*
 
 COPY tsconfig.json ./
 COPY src ./src
 
 EXPOSE 7876
-CMD ["xvfb-run", "-a", "--server-args=-screen 0 1280x800x24", "npm", "run", "api"]
+CMD ["sh", "-lc", "echo 'Starting groc API under Xvfb...' && xvfb-run -a --server-args='-screen 0 1280x800x24' npm run api"]
