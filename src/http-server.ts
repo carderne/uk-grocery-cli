@@ -123,7 +123,7 @@ function kickOffLogin(providerName: ProviderName): void {
       console.log(`Background login to ${providerName} completed`);
     })
     .catch((error: any) => {
-      console.error(`Background login to ${providerName} failed:`, error?.message || error);
+      console.error(`Background login to ${providerName} failed:`, error?.stack || error?.message || error);
     })
     .finally(() => {
       loginAttempts.delete(providerName);
@@ -227,7 +227,7 @@ const server = http.createServer((req, res) => {
       const url = new URL(req.url || '/', `http://${req.headers.host || `${host}:${port}`}`);
       const providerName = (url.searchParams.get('provider') || defaultProvider) as ProviderName;
       sendJson(res, 401, { error: 'no session or session expired, attempting a login, try again in 30 seconds' });
-      kickOffLogin(providerName);
+      res.once('finish', () => kickOffLogin(providerName));
       return;
     }
 
