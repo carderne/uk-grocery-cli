@@ -161,6 +161,7 @@ export async function login(email: string, password: string): Promise<SessionDat
   }
 }
 
+
 export function saveSession(session: SessionData) {
   if (!fs.existsSync(CONFIG_DIR)) {
     fs.mkdirSync(CONFIG_DIR, { recursive: true });

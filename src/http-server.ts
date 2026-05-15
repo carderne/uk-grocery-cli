@@ -14,6 +14,7 @@ const host = process.env.GROC_API_HOST || '127.0.0.1';
 const port = parsePort(process.env.GROC_API_PORT || '7876');
 const defaultProvider = (process.env.GROC_PROVIDER || 'sainsburys') as ProviderName;
 const apiToken = process.env.GROC_API_TOKEN;
+const loginAttempts = new Map<string, Promise<void>>();
 
 function parsePort(value: string): number {
   const parsed = Number(value);
@@ -55,6 +56,50 @@ function requireQuery(url: URL, name: string): string {
 function checkAuth(req: http.IncomingMessage): boolean {
   if (!apiToken) return true;
   return req.headers.authorization === `Bearer ${apiToken}`;
+}
+
+function isProviderAuthError(error: any): boolean {
+  const status = error?.response?.status ?? error?.status ?? error?.statusCode;
+  if (status === 401) return true;
+  return /\b401\b|unauthori[sz]ed|session expired|not logged in/i.test(error?.message || '');
+}
+
+function getLoginCredentials(providerName: ProviderName): { email?: string; password?: string } {
+  const prefix = providerName.toUpperCase();
+  return {
+    email: process.env[`${prefix}_EMAIL`] || process.env.GROC_EMAIL,
+    password: process.env[`${prefix}_PASSWORD`] || process.env.GROC_PASSWORD,
+  };
+}
+
+function kickOffLogin(providerName: ProviderName): void {
+  if (loginAttempts.has(providerName)) {
+    console.log(`Login already in progress for ${providerName}`);
+    return;
+  }
+
+  const { email, password } = getLoginCredentials(providerName);
+  if (!email || !password) {
+    console.error(
+      `Cannot auto-login to ${providerName}: set GROC_EMAIL/GROC_PASSWORD or ${providerName.toUpperCase()}_EMAIL/${providerName.toUpperCase()}_PASSWORD`
+    );
+    return;
+  }
+
+  console.log(`No session or session expired for ${providerName}; starting background login...`);
+  const attempt = ProviderFactory.create(providerName)
+    .login(email, password)
+    .then(() => {
+      console.log(`Background login to ${providerName} completed`);
+    })
+    .catch((error: any) => {
+      console.error(`Background login to ${providerName} failed:`, error?.message || error);
+    })
+    .finally(() => {
+      loginAttempts.delete(providerName);
+    });
+
+  loginAttempts.set(providerName, attempt);
 }
 
 async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
@@ -146,6 +191,14 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
 
 const server = http.createServer((req, res) => {
   handleRequest(req, res).catch((error: any) => {
+    if (isProviderAuthError(error)) {
+      const url = new URL(req.url || '/', `http://${req.headers.host || `${host}:${port}`}`);
+      const providerName = (url.searchParams.get('provider') || defaultProvider) as ProviderName;
+      sendJson(res, 401, { error: 'no session or session expired, attempting a login, try again in 30 seconds' });
+      kickOffLogin(providerName);
+      return;
+    }
+
     const status = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
     sendJson(res, status, { error: error?.message || 'Internal server error' });
   });
